@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>태양계 탐험대</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: black; user-select: none; -webkit-user-select: none; }
+        @import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
+        * { font-family: 'Jua', sans-serif; }
+        
+        #game-container { position: relative; width: 100%; height: 100%; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        /* 시작 화면 배경 (흐릿한 우주) */
+        .blur-bg {
+            background-image: url('https://images.unsplash.com/photo-1462331940025-496dfbfc7564?q=80&w=1000&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            filter: blur(8px);
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+
+        /* 가로 타원형 버튼 스타일 */
+        .oval-btn {
+            border-radius: 50% / 50%;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .oval-btn:active { transform: scale(0.95); }
+
+        /* 컨트롤 버튼들 */
+        .control-btn {
+            width: 60px; height: 60px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            color: white; font-size: 24px;
+            display: flex; justify-content: center; align-items: center;
+            backdrop-filter: blur(4px);
+            cursor: pointer;
+        }
+        .control-btn:active { background: rgba(255, 255, 255, 0.4); }
+
+        /* 토스트 메시지 */
+        .toast {
+            position: absolute; top: 20%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8); color: #fff; padding: 10px 20px;
+            border-radius: 20px; font-size: 1.2rem; z-index: 100;
+            opacity: 1; transition: opacity 0.5s; pointer-events: none; border: 2px solid gold;
+        }
+        
+        /* O/X 피드백 애니메이션 */
+        @keyframes pop {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+        }
+        .feedback-anim { animation: pop 1.5s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <!-- 게임 캔버스 -->
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center z-20">
+            <div class="blur-bg"></div>
+            <div class="relative z-10 flex flex-col items-center">
+                <!-- 우주선 일러스트 (이모지 대체) -->
+                <div class="text-8xl mb-4 animate-bounce">🚀</div>
+                <h1 class="text-white text-5xl md:text-7xl font-bold mb-8 drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)] text-center">태양계 탐험대</h1>
+                <!-- START 버튼 -->
+                <button onclick="startGame()" class="oval-btn px-16 py-6 bg-gradient-to-r from-blue-500 to-purple-600 text-white text-4xl font-bold border-4 border-white shadow-[0_0_20px_rgba(255,255,255,0.5)] hover:from-blue-400 hover:to-purple-500">
+                    START
+                </button>
+                <p class="text-gray-200 mt-6 text-lg bg-black/50 px-4 py-2 rounded-lg text-center">
+                    운석을 쏴 골드를 모으고, 행성을 맞춰 퀴즈를 푸세요!<br>
+                    (PC: 방향키 & 스페이스바 / 모바일: 터치 버튼)
+                </p>
+            </div>
+        </div>
+
+        <div id="hud" class="absolute inset-0 z-10 hidden pointer-events-none">
+            <!-- 상태창 (좌측 상단) -->
+            <div class="absolute top-4 left-4 flex flex-col gap-2 bg-black/50 p-4 rounded-xl border-2 border-white/30 text-white text-lg md:text-xl pointer-events-auto shadow-lg">
+                <div class="flex items-center gap-2"><span class="text-red-400">❤️ 생명:</span> <span id="ui-lives">10</span></div>
+                <div class="flex items-center gap-2"><span class="text-blue-400">⚡ 연료:</span> <span id="ui-fuel">100</span></div>
+                <div class="flex items-center gap-2"><span class="text-gray-300">☄️ 탄약:</span> <span id="ui-ammo">100</span></div>
+                <div class="flex items-center gap-2"><span class="text-yellow-400">💰 골드:</span> <span id="ui-gold">0</span> G</div>
+                <div class="flex items-center gap-2 text-sm text-yellow-200 mt-1" id="ui-level-info">Lv.1 우주선</div>
+            </div>
+
+            <!-- 우측 상단 버튼 -->
+            <div class="absolute top-4 right-4 flex gap-4 pointer-events-auto items-center">
+                <button onclick="tradeLifeForAmmo()" class="px-4 py-2 bg-red-600/80 rounded-full flex items-center justify-center text-white text-sm md:text-base border-2 border-red-300 hover:bg-red-500 shadow-lg whitespace-nowrap" title="생명 1개로 탄약 20개 교환">
+                    -1❤️ = +20☄️
+                </button>
+                <button onclick="goHome()" class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl border-2 border-white hover:bg-white/40">🏠</button>
+                <button onclick="toggleFullScreen()" class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl border-2 border-white hover:bg-white/40">🔲</button>
+            </div>
+
+            <!-- 하단 중앙 업그레이드 상점 -->
+            <div class="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-auto">
+                <button onclick="upgradeShip()" id="upgrade-btn" class="px-6 py-3 bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full text-white font-bold text-lg border-2 border-white shadow-lg hover:scale-105 transition-transform whitespace-nowrap">
+                    🚀 업그레이드(3000G)
+                </button>
+            </div>
+
+            <!-- 조작 버튼 (모바일용) -->
+            <div class="absolute bottom-6 right-6 flex gap-2 pointer-events-auto">
+                <button id="btn-left" class="control-btn">◀</button>
+                <button id="btn-right" class="control-btn">▶</button>
+            </div>
+            <div class="absolute bottom-6 left-6 pointer-events-auto">
+                <button id="btn-shoot" class="control-btn w-20 h-20 text-4xl bg-red-500/50 border-red-300">💥</button>
+            </div>
+        </div>
+
+        <div id="quiz-modal" class="absolute inset-0 bg-black/80 z-30 hidden flex items-center justify-center">
+            <div class="bg-gradient-to-b from-blue-900 to-purple-900 p-8 rounded-3xl border-4 border-blue-400 shadow-[0_0_30px_blue] max-w-lg w-11/12 text-center relative overflow-hidden">
+                <div class="text-6xl mb-4" id="quiz-planet-emoji">🪐</div>
+                <h2 class="text-3xl text-yellow-300 mb-6 font-bold" id="quiz-title">수성 퀴즈!</h2>
+                <p class="text-white text-xl mb-8 leading-relaxed" id="quiz-question">여기에 문제가 표시됩니다.</p>
+                
+                <!-- 객관식 / OX 영역 -->
+                <div id="quiz-buttons" class="grid grid-cols-1 gap-4 mb-4">
+                    <!-- 버튼들이 JS로 생성됨 -->
+                </div>
+                
+                <!-- 단답형 영역 -->
+                <div id="quiz-input-area" class="hidden flex flex-col items-center gap-4 mb-4">
+                    <input type="text" id="quiz-input" class="w-full text-center px-4 py-3 rounded-xl text-black text-xl font-bold border-4 border-blue-300 outline-none" placeholder="정답을 입력하세요">
+                    <button onclick="submitShortAnswer()" class="w-full bg-green-500 text-white px-6 py-3 rounded-xl text-xl font-bold hover:bg-green-400">정답 확인</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- O/X 피드백 오버레이 -->
+        <div id="feedback-overlay" class="absolute inset-0 z-40 hidden flex items-center justify-center pointer-events-none">
+            <div id="feedback-text" class="text-[200px] font-bold drop-shadow-[0_0_30px_rgba(255,255,255,0.8)]">O</div>
+        </div>
+
+        <div id="reward-modal" class="absolute inset-0 bg-black/80 z-30 hidden flex items-center justify-center">
+            <div class="text-center">
+                <h2 class="text-4xl text-yellow-300 mb-8 font-bold drop-shadow-md">정답입니다! 상자를 선택하세요</h2>
+                <div class="flex gap-6 justify-center">
+                    <button onclick="openChest(0)" class="text-8xl hover:scale-125 transition-transform hover:drop-shadow-[0_0_20px_gold]">🎁</button>
+                    <button onclick="openChest(1)" class="text-8xl hover:scale-125 transition-transform hover:drop-shadow-[0_0_20px_gold]">🎁</button>
+                    <button onclick="openChest(2)" class="text-8xl hover:scale-125 transition-transform hover:drop-shadow-[0_0_20px_gold]">🎁</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="game-over-screen" class="absolute inset-0 bg-black/90 z-50 hidden flex flex-col items-center justify-center">
+            <!-- 가로로 긴 타원형 배경 -->
+            <div class="bg-red-600/20 border-8 border-red-500 rounded-[50%/50%] px-20 py-12 flex flex-col items-center shadow-[0_0_50px_red]">
+                <h1 class="text-white text-7xl font-bold mb-4 drop-shadow-lg">GAME OVER</h1>
+                <p id="game-over-reason" class="text-gray-300 text-2xl mb-8">생명을 모두 잃었습니다.</p>
+                <button onclick="resetToStart()" class="bg-white text-black px-8 py-3 rounded-full text-2xl font-bold hover:bg-gray-300 transition-colors">처음으로</button>
+            </div>
+        </div>
+
+        <div id="game-win-screen" class="absolute inset-0 bg-black/90 z-50 hidden flex flex-col items-center justify-center">
+            <div class="bg-yellow-500/20 border-8 border-yellow-400 rounded-[50%/50%] px-20 py-12 flex flex-col items-center shadow-[0_0_50px_gold]">
+                <div class="text-6xl mb-4">🏆</div>
+                <h1 class="text-white text-7xl font-bold mb-4 drop-shadow-lg text-center">YOU WIN!</h1>
+                <p class="text-yellow-200 text-2xl mb-8 text-center">태양계의 모든 행성 퀴즈를 통과했습니다!</p>
+                <button onclick="resetToStart()" class="bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-8 py-3 rounded-full text-2xl font-bold hover:scale-105 transition-transform border-2 border-white">다시 플레이</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        function resizeCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 게임 상태
+        let gameState = 'START'; // START, PLAYING, QUIZ, REWARD, GAME_OVER, GAME_WIN
+        let lastTime = 0;
+        let animationId;
+
+        // 플레이어 정보
+        const player = {
+            x: 0, y: 0, width: 60, height: 60, speed: 400,
+            lives: 10, fuel: 100, ammo: 100, gold: 0, level: 1,
+            emoji: '🚀',
+            movingLeft: false, movingRight: false, shooting: false, lastShot: 0
+        };
+
+        // 데이터 배열
+        let bullets = [];
+        let asteroids = [];
+        let stars = [];
+        let particles = [];
+        let currentPlanet = null; // 현재 화면에 나오는 행성
+
+        // 행성 및 퀴즈 데이터 (4학년 2학기 수준)
+        const planetData = [
+            { name: "수성", emoji: "🌑", color: "#A8A8A8", 
+              quiz: { type: "단답", q: "태양계에서 가장 크기가 작은 행성의 이름은 무엇일까요?", a: "수성" } },
+            { name: "금성", emoji: "🌕", color: "#EEDD82", 
+              quiz: { type: "객관식", q: "지구와 크기가 가장 비슷한 행성은 무엇일까요?", options: ["수성", "금성", "화성"], a: "금성" } },
+            { name: "지구", emoji: "🌍", color: "#4B90E2", 
+              quiz: { type: "OX", q: "지구는 태양계 행성 중 유일하게 액체 상태의 물이 있고 생명체가 살고 있다.", a: "O" } },
+            { name: "화성", emoji: "🔴", color: "#E74C3C", 
+              quiz: { type: "OX", q: "화성의 표면은 파란색을 띠고 있다.", a: "X" } }, // 붉은색
+            { name: "목성", emoji: "🪐", color: "#D35400", 
+              quiz: { type: "객관식", q: "태양계에서 가장 크기가 큰 행성은 무엇일까요?", options: ["목성", "토성", "천왕성"], a: "목성" } },
+            { name: "토성", emoji: "🪐", color: "#F4D03F", // 토성은 고리가 특징
+              quiz: { type: "단답", q: "얼음과 암석 조각들로 이루어진 아름다운 고리를 가진 행성은?", a: "토성" } },
+            { name: "천왕성", emoji: "🧊", color: "#76D7C4", 
+              quiz: { type: "객관식", q: "천왕성의 가장 큰 특징은 무엇일까요?", options: ["가장 뜨겁다", "누워서 자전한다", "고리가 없다"], a: "누워서 자전한다" } },
+            { name: "해왕성", emoji: "🔵", color: "#2E86C1", 
+              quiz: { type: "OX", q: "해왕성은 태양계에서 태양으로부터 가장 멀리 떨어져 있는 행성이다.", a: "O" } }
+        ];
+        let currentPlanetIndex = 0;
+        let planetSpawnTimer = 0;
+        let asteroidSpawnTimer = 0;
+        
+        let fuelTimer = 0; // 연료 감소용 타이머
+
+        function initStars() {
+            stars = [];
+            for(let i=0; i<100; i++){
+                stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 2 + 1,
+                    speed: Math.random() * 50 + 20
+                });
+            }
+        }
+
+        function updateHUD() {
+            document.getElementById('ui-lives').innerText = player.lives;
+            document.getElementById('ui-fuel').innerText = Math.floor(player.fuel);
+            document.getElementById('ui-ammo').innerText = player.ammo;
+            document.getElementById('ui-gold').innerText = player.gold;
+            document.getElementById('ui-level-info').innerText = `Lv.${player.level} 우주선`;
+            
+            const cost = player.level * 3000;
+            const upBtn = document.getElementById('upgrade-btn');
+            upBtn.innerHTML = `🚀 업그레이드(${cost}G)`;
+            if(player.gold >= cost) {
+                upBtn.classList.remove('opacity-50');
+                upBtn.classList.add('animate-pulse');
+            } else {
+                upBtn.classList.add('opacity-50');
+                upBtn.classList.remove('animate-pulse');
+            }
+        }
+
+        function showMsg(text) {
+            const msg = document.createElement('div');
+            msg.className = 'toast';
+            msg.innerText = text;
+            document.body.appendChild(msg);
+            setTimeout(() => {
+                msg.style.opacity = '0';
+                setTimeout(() => msg.remove(), 500);
+            }, 2000);
+        }
+
+        function upgradeShip() {
+            let cost = player.level * 3000;
+            if(player.gold >= cost) {
+                player.gold -= cost;
+                player.level++;
+                
+                // 레벨업 시 효과 적용
+                const emojis = ['🚀', '🛸', '🛰️', '☄️', '🌟'];
+                player.emoji = emojis[(player.level - 1) % emojis.length];
+                if(player.width < 100) player.width += 5;
+                
+                showMsg(`우주선 Lv.${player.level} (으)로 폭풍 업그레이드!!`);
+                updateHUD();
+            } else {
+                showMsg(`골드가 부족해요! (${cost - player.gold}G 더 필요함)`);
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if(gameState !== 'PLAYING') return;
+            if(e.key === 'ArrowLeft') player.movingLeft = true;
+            if(e.key === 'ArrowRight') player.movingRight = true;
+            if(e.key === ' ') shoot();
+        });
+        window.addEventListener('keyup', (e) => {
+            if(e.key === 'ArrowLeft') player.movingLeft = false;
+            if(e.key === 'ArrowRight') player.movingRight = false;
+        });
+
+        // 모바일 터치 제어
+        const btnL = document.getElementById('btn-left');
+        const btnR = document.getElementById('btn-right');
+        const btnS = document.getElementById('btn-shoot');
+
+        const addTouch = (el, downFn, upFn) => {
+            el.addEventListener('mousedown', downFn);
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); downFn(); }, {passive:false});
+            el.addEventListener('mouseup', upFn);
+            el.addEventListener('mouseleave', upFn);
+            el.addEventListener('touchend', (e) => { e.preventDefault(); upFn(); }, {passive:false});
+        };
+
+        addTouch(btnL, () => player.movingLeft = true, () => player.movingLeft = false);
+        addTouch(btnR, () => player.movingRight = true, () => player.movingRight = false);
+        addTouch(btnS, () => { if(gameState === 'PLAYING') shoot(); }, () => {});
+
+        function shoot() {
+            const now = performance.now();
+            if(now - player.lastShot < 200) return; // 연사 속도 제한
+            
+            if(player.ammo > 0) {
+                bullets.push({
+                    x: player.x,
+                    y: player.y - player.height/2,
+                    radius: 5 + Math.min(player.level, 10), // 레벨업 시 커짐
+                    speed: 600 + (player.level * 20), // 레벨업 시 빨라짐
+                    color: `hsl(${(player.level * 50) % 360}, 100%, 60%)` // 색상 변화
+                });
+                player.ammo--;
+                player.lastShot = now;
+                updateHUD();
+            } else {
+                showMsg("탄약이 부족합니다!");
+            }
+        }
+
+        // 화면 제어
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
+
+        // 생명으로 탄약 교환 기능 추가
+        function tradeLifeForAmmo() {
+            if (gameState !== 'PLAYING') return;
+            
+            if (player.lives > 1) { // 최소 생명 1개는 남겨둬야 교환 가능하도록 설정 (선택사항)
+                player.lives -= 1;
+                player.ammo += 20;
+                updateHUD();
+                showMsg("생명 1개를 소모하여 탄약 20개를 얻었습니다!");
+            } else {
+                showMsg("생명이 부족하여 교환할 수 없습니다!");
+            }
+        }
+
+        function goHome() {
+            gameState = 'START';
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('start-screen').classList.remove('hidden');
+            document.getElementById('quiz-modal').classList.add('hidden');
+            document.getElementById('reward-modal').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.add('hidden');
+            document.getElementById('game-win-screen').classList.add('hidden');
+        }
+        function resetToStart() { goHome(); }
+
+        function startGame() {
+            resizeCanvas();
+            gameState = 'PLAYING';
+            
+            player.x = width / 2;
+            player.y = height - 100;
+            player.width = 60;
+            player.height = 60;
+            player.lives = 10;
+            player.fuel = 100;
+            player.ammo = 100;
+            player.gold = 0;
+            player.level = 1;
+            player.emoji = '🚀';
+            
+            bullets = [];
+            asteroids = [];
+            particles = [];
+            currentPlanet = null;
+            currentPlanetIndex = 0;
+            asteroidSpawnTimer = 0;
+            planetSpawnTimer = 0;
+            fuelTimer = 0;
+            
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.add('hidden');
+            document.getElementById('game-win-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            
+            updateHUD();
+            initStars();
+            
+            lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function createExplosion(x, y, color) {
+            for(let i=0; i<15; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 400,
+                    vy: (Math.random() - 0.5) * 400,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function spawnAsteroid() {
+            asteroids.push({
+                x: Math.random() * (width - 60) + 30,
+                y: -50,
+                radius: 30,
+                speed: Math.random() * 100 + 100, // 100~200
+                hp: 1,
+                emoji: '🪨'
+            });
+        }
+
+        function spawnPlanet() {
+            if(currentPlanetIndex >= planetData.length) return;
+            const pd = planetData[currentPlanetIndex];
+            currentPlanet = {
+                x: width / 2, // 행성은 중앙 위에서 천천히 내려옴
+                y: -100,
+                radius: 60,
+                speed: 30,
+                data: pd
+            };
+        }
+
+        function update(dt) {
+            // 별 이동
+            stars.forEach(s => {
+                s.y += s.speed * dt;
+                if(s.y > height) { s.y = 0; s.x = Math.random() * width; }
+            });
+
+            // 플레이어 이동
+            if(player.movingLeft) player.x -= player.speed * dt;
+            if(player.movingRight) player.x += player.speed * dt;
+            player.x = Math.max(player.width/2, Math.min(width - player.width/2, player.x)); // 화면 이탈 방지
+
+            // 연료 감소 (초당 1씩)
+            fuelTimer += dt;
+            if(fuelTimer >= 1.0) {
+                player.fuel -= 1;
+                fuelTimer = 0;
+                if(player.fuel <= 0) {
+                    player.lives--;
+                    player.fuel = 100;
+                    showMsg("연료가 바닥나 우주선이 멈췄습니다! 생명 -1");
+                    if(player.lives <= 0) triggerGameOver("연료가 고갈되었습니다.");
+                }
+                updateHUD();
+            }
+
+            // 스폰 타이머
+            asteroidSpawnTimer += dt;
+            if(asteroidSpawnTimer > 1.5) { // 1.5초마다 소행성
+                spawnAsteroid();
+                asteroidSpawnTimer = 0;
+            }
+
+            if(!currentPlanet) {
+                planetSpawnTimer += dt;
+                if(planetSpawnTimer > 10) { // 10초마다 행성 등장
+                    spawnPlanet();
+                    planetSpawnTimer = 0;
+                }
+            }
+
+            // 총알 이동
+            for(let i = bullets.length-1; i>=0; i--){
+                bullets[i].y -= bullets[i].speed * dt;
+                if(bullets[i].y < -50) bullets.splice(i, 1);
+            }
+
+            // 파티클 업데이트
+            for(let i = particles.length-1; i>=0; i--){
+                particles[i].x += particles[i].vx * dt;
+                particles[i].y += particles[i].vy * dt;
+                particles[i].life -= dt * 2;
+                if(particles[i].life <= 0) particles.splice(i, 1);
+            }
+
+            // 소행성 업데이트 및 충돌 검사
+            for(let i = asteroids.length-1; i>=0; i--){
+                let a = asteroids[i];
+                a.y += a.speed * dt;
+                
+                // 플레이어 충돌
+                const distP = Math.hypot(a.x - player.x, a.y - player.y);
+                if(distP < a.radius + player.width/2 - 10) {
+                    player.lives--;
+                    createExplosion(a.x, a.y, '#aaa');
+                    asteroids.splice(i, 1);
+                    updateHUD();
+                    showMsg("앗! 소행성과 충돌했습니다.");
+                    if(player.lives <= 0) triggerGameOver("소행성과 부딪혔습니다.");
+                    continue;
+                }
+
+                // 총알 충돌
+                let hit = false;
+                for(let j=bullets.length-1; j>=0; j--){
+                    let b = bullets[j];
+                    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+                    if(dist < a.radius + b.radius) {
+                        hit = true;
+                        bullets.splice(j, 1);
+                        break;
+                    }
+                }
+                if(hit) {
+                    player.gold += 300;
+                    createExplosion(a.x, a.y, '#aaa');
+                    asteroids.splice(i, 1);
+                    updateHUD();
+                    continue;
+                }
+
+                if(a.y > height + 50) asteroids.splice(i, 1);
+            }
+
+            // 행성 업데이트 및 충돌 검사
+            if(currentPlanet) {
+                currentPlanet.y += currentPlanet.speed * dt;
+                
+                let hitPlanet = false;
+                for(let j=bullets.length-1; j>=0; j--){
+                    let b = bullets[j];
+                    const dist = Math.hypot(currentPlanet.x - b.x, currentPlanet.y - b.y);
+                    if(dist < currentPlanet.radius + b.radius) {
+                        bullets.splice(j, 1);
+                        hitPlanet = true;
+                        break;
+                    }
+                }
+
+                if(hitPlanet) {
+                    // 행성을 맞추면 퀴즈 시작!
+                    startQuiz(currentPlanet.data);
+                    currentPlanet = null; // 화면에서 제거
+                } else if(currentPlanet.y > height + 100) {
+                    // 화면 밖으로 나가면 나중에 다시 나오도록 처리
+                    currentPlanet = null;
+                    planetSpawnTimer = 0; 
+                }
+            }
+        }
+
+        function drawTextCenter(text, x, y, size, color) {
+            ctx.fillStyle = color;
+            ctx.font = `${size}px Jua`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // 별
+            ctx.fillStyle = '#fff';
+            stars.forEach(s => {
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // 플레이어
+            drawTextCenter(player.emoji, player.x, player.y, player.width, 'white');
+
+            // 총알
+            bullets.forEach(b => {
+                ctx.fillStyle = b.color;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
+                ctx.fill();
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = b.color;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+
+            // 소행성
+            asteroids.forEach(a => {
+                drawTextCenter(a.emoji, a.x, a.y, a.radius*2, 'white');
+            });
+
+            // 행성
+            if(currentPlanet) {
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = currentPlanet.data.color;
+                drawTextCenter(currentPlanet.data.emoji, currentPlanet.x, currentPlanet.y, currentPlanet.radius*2, 'white');
+                ctx.shadowBlur = 0;
+                
+                // 행성 위 이름 표시
+                ctx.fillStyle = "white";
+                ctx.font = "20px Jua";
+                ctx.fillText(`[🎯 쏴서 퀴즈 풀기]`, currentPlanet.x, currentPlanet.y - currentPlanet.radius - 20);
+                ctx.fillText(currentPlanet.data.name, currentPlanet.x, currentPlanet.y - currentPlanet.radius);
+            }
+
+            // 파티클
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+        }
+
+        function gameLoop(time) {
+            if(gameState !== 'PLAYING') return;
+            const dt = (time - lastTime) / 1000;
+            lastTime = time;
+            
+            // dt 캡핑 (탭 백그라운드 등 방지)
+            if(dt < 0.1) { 
+                update(dt);
+                draw();
+            }
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        let currentQuizData = null;
+
+        function startQuiz(data) {
+            gameState = 'QUIZ';
+            currentQuizData = data;
+            
+            document.getElementById('quiz-modal').classList.remove('hidden');
+            document.getElementById('quiz-planet-emoji').innerText = data.emoji;
+            document.getElementById('quiz-title').innerText = `${data.name} 퀴즈!`;
+            document.getElementById('quiz-question').innerText = data.quiz.q;
+            
+            const btnArea = document.getElementById('quiz-buttons');
+            const inputArea = document.getElementById('quiz-input-area');
+            const inputField = document.getElementById('quiz-input');
+            
+            btnArea.innerHTML = '';
+            btnArea.classList.add('hidden');
+            inputArea.classList.add('hidden');
+            inputField.value = '';
+
+            if(data.quiz.type === '객관식' || data.quiz.type === 'OX') {
+                btnArea.classList.remove('hidden');
+                let options = data.quiz.type === 'OX' ? ['O', 'X'] : data.quiz.options;
+                
+                options.forEach(opt => {
+                    const btn = document.createElement('button');
+                    btn.className = 'w-full bg-blue-600/80 text-white px-6 py-4 rounded-xl text-xl font-bold border-2 border-blue-400 hover:bg-blue-500 transition-colors';
+                    btn.innerText = opt;
+                    btn.onclick = () => checkAnswer(opt);
+                    btnArea.appendChild(btn);
+                });
+            } else if(data.quiz.type === '단답') {
+                inputArea.classList.remove('hidden');
+            }
+        }
+
+        function submitShortAnswer() {
+            const val = document.getElementById('quiz-input').value.trim();
+            if(val) checkAnswer(val);
+        }
+
+        function checkAnswer(userAnswer) {
+            document.getElementById('quiz-modal').classList.add('hidden');
+            const isCorrect = (userAnswer === currentQuizData.quiz.a);
+            
+            showFeedback(isCorrect, () => {
+                if(isCorrect) {
+                    gameState = 'REWARD';
+                    document.getElementById('reward-modal').classList.remove('hidden');
+                } else {
+                    player.lives--;
+                    updateHUD();
+                    if(player.lives <= 0) {
+                        triggerGameOver("퀴즈를 틀려서 생명을 잃었습니다.");
+                    } else {
+                        // 틀렸을 경우 행성 인덱스를 증가시키지 않고 게임 재개 (다시 풀어야함)
+                        resumeGame();
+                    }
+                }
+            });
+        }
+
+        function showFeedback(isO, callback) {
+            const overlay = document.getElementById('feedback-overlay');
+            const txt = document.getElementById('feedback-text');
+            
+            overlay.classList.remove('hidden');
+            txt.innerText = isO ? 'O' : 'X';
+            txt.className = `text-[300px] font-bold feedback-anim ${isO ? 'text-green-400 drop-shadow-[0_0_50px_lime]' : 'text-red-500 drop-shadow-[0_0_50px_red]'}`;
+            
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+                txt.classList.remove('feedback-anim');
+                callback();
+            }, 1500);
+        }
+
+        function openChest(index) {
+            document.getElementById('reward-modal').classList.add('hidden');
+            
+            // 보상 풀: 연료 증가/감소, 탄약 증가/감소, 꽝
+            const rewards = [
+                { text: "연료 +30 획득!", act: () => player.fuel += 30 },
+                { text: "앗! 연료가 조금 샜어요 (-10)", act: () => player.fuel -= 10 },
+                { text: "탄약 +30 획득!", act: () => player.ammo += 30 },
+                { text: "탄약을 떨어뜨렸어요 (-10)", act: () => player.ammo -= 10 },
+                { text: "꽝! (아무 일도 일어나지 않았다)", act: () => {} }
+            ];
+            
+            const r = rewards[Math.floor(Math.random() * rewards.length)];
+            r.act();
+            showMsg(r.text);
+            
+            // 정답을 맞췄으므로 다음 행성으로 진행
+            currentPlanetIndex++;
+            updateHUD();
+
+            if(currentPlanetIndex >= planetData.length) {
+                // 승리
+                gameState = 'GAME_WIN';
+                document.getElementById('game-win-screen').classList.remove('hidden');
+                document.getElementById('hud').classList.add('hidden');
+            } else {
+                resumeGame();
+            }
+        }
+
+        function resumeGame() {
+            gameState = 'PLAYING';
+            lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function triggerGameOver(reason) {
+            gameState = 'GAME_OVER';
+            document.getElementById('game-over-reason').innerText = reason;
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.remove('hidden');
+        }
+        
+    </script>
+</body>
+</html>
